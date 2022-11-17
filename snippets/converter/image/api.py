@@ -37,7 +37,7 @@ instanceReady = True
 def representative_dataset_gen():
     global labels, datapath
     for label_index in range(len(labels)):
-        img_folder_path = datapath + '/' + labels[label_index]
+        img_folder_path = f'{datapath}/{labels[label_index]}'
         dirListing = os.listdir(img_folder_path)
         for f in dirListing:
             if not f.startswith('.'):
@@ -65,24 +65,27 @@ def unzipFile(file, job_dir):
         model_data.extractall(job_dir)
     return True
 def returnFile(filename, model_dir, data_dir, isSavedModel=False):
-    with zipfile.ZipFile(model_dir + '/retZip.zip', 'w') as zip:
+    with zipfile.ZipFile(f'{model_dir}/retZip.zip', 'w') as zip:
         # If the return type is savedmodel, recursively add the files in the savedmodel directory.
-        if (isSavedModel):
-            for dirname, subdirs, files in os.walk(model_dir + '/' + filename):
+        if isSavedModel:
+            for dirname, subdirs, files in os.walk(f'{model_dir}/{filename}'):
                 # We use  relpath to remove the /tmp/xxxxx/ from the archive paths. 
                 zip.write(dirname, os.path.relpath(dirname, model_dir))
                 for filename in files:
                     zip.write(os.path.join(dirname, filename), os.path.relpath(os.path.join(dirname, filename), model_dir))
         else:
-            zip.write(model_dir + '/' + filename, filename)
-        
-        zip.write(model_dir + '/labels.txt', 'labels.txt')
+            zip.write(f'{model_dir}/{filename}', filename)
+
+        zip.write(f'{model_dir}/labels.txt', 'labels.txt')
     global instanceReady
     instanceReady = True
-    return FileResponse(model_dir + '/retZip.zip', 
-                            media_type='application/octet-stream', filename='converted_model.zip')
+    return FileResponse(
+        f'{model_dir}/retZip.zip',
+        media_type='application/octet-stream',
+        filename='converted_model.zip',
+    )
 def cleanup_files(model_dir, data_dir):
-    print("### DELETING FILES "+model_dir, flush=True)
+    print(f"### DELETING FILES {model_dir}", flush=True)
     shutil.rmtree(model_dir)
     shutil.rmtree(data_dir)
 
@@ -98,27 +101,27 @@ async def create_upload_file(type: str, format: str, background_tasks: Backgroun
     global labels, datapath, instanceReady
 
     instanceReady = False
-    
-    if ((format == 'edgetpu' or format == 'tflite_quantized')and dataset == None):
+
+    if format in {'edgetpu', 'tflite_quantized'} and dataset is None:
         return {'No representative dataset supplied'}
     model_dir = tempfile.mkdtemp()
-    print("### Created "+model_dir)
-    data_dir = tempfile.mkdtemp() 
+    print(f"### Created {model_dir}")
+    data_dir = tempfile.mkdtemp()
     unzipFile(model, model_dir)
-    
+
     background_tasks.add_task(cleanup_files, model_dir, data_dir)
-    
-    with open(model_dir + '/metadata.json') as json_file:
+
+    with open(f'{model_dir}/metadata.json') as json_file:
         data = json.load(json_file)
-    
+
     labels = data['labels']
-    
+
     print("Generating lables.txt")
-    with open(model_dir + '/labels.txt', 'w') as f:
+    with open(f'{model_dir}/labels.txt', 'w') as f:
         for idx, label in enumerate(labels):
-            f.write("{} {}\n".format(idx, label))
+            f.write(f"{idx} {label}\n")
     print('Labels:'+', '.join(labels), flush=True)
-    
+
     print('converting model to keras', flush=True)
     os.system('tensorflowjs_converter --input_format tfjs_layers_model --output_format keras "' +
                 model_dir + '/model.json" ' + model_dir + '/keras_model.h5')
@@ -126,34 +129,34 @@ async def create_upload_file(type: str, format: str, background_tasks: Backgroun
         return returnFile('keras_model.h5', model_dir, data_dir)
     # Generate savedmodel
     print('converting model to saved model', flush=True)
-    model = tf.keras.models.load_model(model_dir + '/keras_model.h5')
-    model.save(model_dir + '/model.savedmodel')
-    
+    model = tf.keras.models.load_model(f'{model_dir}/keras_model.h5')
+    model.save(f'{model_dir}/model.savedmodel')
+
     if format == 'savedmodel':
         return returnFile('model.savedmodel', model_dir, data_dir, True)
-    
+
     if format == 'tflite':
         # Generate tflite unquantized
         tflite_unquant_model = convertSavedModelTFLiteUnQuantized(
-            model_dir + '/model.savedmodel')
-        open(model_dir + '/model_unquant.tflite', 'wb').write(tflite_unquant_model)
+            f'{model_dir}/model.savedmodel'
+        )
+
+        open(f'{model_dir}/model_unquant.tflite', 'wb').write(tflite_unquant_model)
         return returnFile('model_unquant.tflite', model_dir, data_dir)
-    
+
     # Generate tflite
     unzipFile(dataset, data_dir)
     datapath = data_dir
     print('convert model to tflite', flush=True)
-    tflite_quant_model = converterSavedModelTFLite(
-        model_dir + '/model.savedmodel')
-    open(model_dir + '/model.tflite', 'wb').write(tflite_quant_model)
-    
+    tflite_quant_model = converterSavedModelTFLite(f'{model_dir}/model.savedmodel')
+    open(f'{model_dir}/model.tflite', 'wb').write(tflite_quant_model)
+
     if format == 'tflite_quantized':
         return returnFile('model.tflite', model_dir, data_dir)
     # Generate edgetpu model
     print('compile model for edgetpu', flush=True)
-    os.system('edgetpu_compiler -s ' + model_dir +
-                '/model.tflite -o ' + model_dir)
-    
+    os.system(f'edgetpu_compiler -s {model_dir}/model.tflite -o {model_dir}')
+
     if format == 'edgetpu':
         return returnFile('model_edgetpu.tflite', model_dir, data_dir)
     else:

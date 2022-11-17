@@ -51,26 +51,29 @@ def unzipFile(file, job_dir):
         model_data.extractall(job_dir)
     return True
 def returnFile(filename, model_dir, data_dir, isSavedModel=False):
-    with zipfile.ZipFile(model_dir + '/retZip.zip', 'w') as zip:
+    with zipfile.ZipFile(f'{model_dir}/retZip.zip', 'w') as zip:
         # If the return type is savedmodel, recursively add the files in the savedmodel directory.
-        if (isSavedModel):
-            for dirname, subdirs, files in os.walk(model_dir + '/' + filename):
+        if isSavedModel:
+            for dirname, subdirs, files in os.walk(f'{model_dir}/{filename}'):
                 # We use  relpath to remove the /tmp/xxxxx/ from the archive paths. 
                 zip.write(dirname, os.path.relpath(dirname, model_dir))
                 for filename in files:
                     zip.write(os.path.join(dirname, filename), os.path.relpath(os.path.join(dirname, filename), model_dir))
         else:
-            zip.write(model_dir + '/' + filename, filename)
-        
-        zip.write(model_dir + '/labels.txt', 'labels.txt')
-    
+            zip.write(f'{model_dir}/{filename}', filename)
+
+        zip.write(f'{model_dir}/labels.txt', 'labels.txt')
+
     global instanceReady
     instanceReady = True
-    
-    return FileResponse(model_dir + '/retZip.zip',
-                            media_type='application/octet-stream', filename='converted_model.zip')
+
+    return FileResponse(
+        f'{model_dir}/retZip.zip',
+        media_type='application/octet-stream',
+        filename='converted_model.zip',
+    )
 def cleanup_files(model_dir, data_dir):
-    print("### DELETING FILES "+model_dir, flush=True)
+    print(f"### DELETING FILES {model_dir}", flush=True)
     shutil.rmtree(model_dir)
     shutil.rmtree(data_dir)
 
@@ -87,40 +90,40 @@ async def create_upload_file(type: str, format: str, background_tasks: Backgroun
     if (type != 'audio' or format != 'tflite'):
         return {'format not supported'}
     model_dir = tempfile.mkdtemp()
-    print("### Created "+model_dir)
+    print(f"### Created {model_dir}")
     data_dir = tempfile.mkdtemp()
     unzipFile(model, model_dir)
-    
+
     background_tasks.add_task(cleanup_files, model_dir, data_dir)
-    
-    with open(model_dir + '/metadata.json') as json_file:
+
+    with open(f'{model_dir}/metadata.json') as json_file:
         data = json.load(json_file)
     labels = data['wordLabels']
-    
+
     print("Generating lables.txt")
-    labels_path = model_dir + '/labels.txt'
+    labels_path = f'{model_dir}/labels.txt'
     with open(labels_path, 'w') as f:
         for idx, label in enumerate(labels):
-            f.write("{} {}\n".format(idx, label))
+            f.write(f"{idx} {label}\n")
     print('Labels:'+', '.join(labels), flush=True)
 
     # specify path to original model and load
-    tfjs_model_json_path = model_dir + '/model.json'
+    tfjs_model_json_path = f'{model_dir}/model.json'
     model = tfjs.converters.load_keras_model(tfjs_model_json_path)
-    
+
     # construct the new model by combining preproc and main classifier
     combined_model = tf.keras.Sequential(name='combined_model')
     combined_model.add(preproc_model)
     combined_model.add(model)
     combined_model.build([None, input_length])
     # save the model as a tflite file
-    tflite_output_path = model_dir + '/soundclassifier.tflite'
+    tflite_output_path = f'{model_dir}/soundclassifier.tflite'
     converter = tf.lite.TFLiteConverter.from_keras_model(combined_model)
     with open(tflite_output_path, 'wb') as f:
         f.write(converter.convert())
 
     # add metadata to model
-    save_to_path = model_dir + '/soundclassifier_with_metadata.tflite'
+    save_to_path = f'{model_dir}/soundclassifier_with_metadata.tflite'
     channels = 1
     tm_sample_rate = 44100
     writer = AudioClassifierWriter.create_for_inference(writer_utils.load_file(tflite_output_path),
