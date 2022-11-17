@@ -37,9 +37,9 @@ instanceReady =  True
 
 def representative_dataset_gen():
     global labels, datapath
-    
+
     for label_index in range(len(labels)):
-        img_folder_path = datapath + '/' + labels[label_index]
+        img_folder_path = f'{datapath}/{labels[label_index]}'
         dirListing = os.listdir(img_folder_path)
 
     for f in dirListing:
@@ -62,57 +62,67 @@ def unzipFile(file, job_dir):
 def returnFolder(folderName, model_dir):
     global instanceReady
     instanceReady = True
-    shutil.make_archive(model_dir + '/retZip', 'zip', model_dir + '/tm_template_script')
-    return FileResponse(model_dir + '/retZip.zip', media_type='application/octet-stream', filename='arduino_sketch.zip')
+    shutil.make_archive(
+        f'{model_dir}/retZip', 'zip', f'{model_dir}/tm_template_script'
+    )
+
+    return FileResponse(
+        f'{model_dir}/retZip.zip',
+        media_type='application/octet-stream',
+        filename='arduino_sketch.zip',
+    )
 
 def returnFile(filename, model_dir, data_dir, isSavedModel=False):
-    with zipfile.ZipFile(model_dir + '/retZip.zip', 'w') as zip:
+    with zipfile.ZipFile(f'{model_dir}/retZip.zip', 'w') as zip:
         # If the return type is savedmodel, recursively add the files in the savedmodel directory.
-        if (isSavedModel):
-            for dirname, subdirs, files in os.walk(model_dir + '/' + filename):
+        if isSavedModel:
+            for dirname, subdirs, files in os.walk(f'{model_dir}/{filename}'):
                 # We use  relpath to remove the /tmp/xxxxx/ from the archive paths. 
                 zip.write(dirname, os.path.relpath(dirname, model_dir))
                 for filename in files:
                     zip.write(os.path.join(dirname, filename), os.path.relpath(os.path.join(dirname, filename), model_dir))
         else:
-            zip.write(model_dir + '/' + filename, filename)
-        
-        zip.write(model_dir + '/labels.txt', 'labels.txt')
-    
+            zip.write(f'{model_dir}/{filename}', filename)
+
+        zip.write(f'{model_dir}/labels.txt', 'labels.txt')
+
     global instanceReady
     instanceReady = True
-    return FileResponse(model_dir + '/retZip.zip',
-                            media_type='application/octet-stream', filename='converted_model.zip')
+    return FileResponse(
+        f'{model_dir}/retZip.zip',
+        media_type='application/octet-stream',
+        filename='converted_model.zip',
+    )
 
 def cleanup_files(model_dir, data_dir):
-    print("### DELETING FILES "+model_dir, flush=True)
+    print(f"### DELETING FILES {model_dir}", flush=True)
     shutil.rmtree(model_dir)
     shutil.rmtree(data_dir)
 def format_labels():
     retStr = ''
     for i in range(len(labels)):
         label = labels[i]
-        retStr += '"{}",'.format(label)
+        retStr += f'"{label}",'
 
     return retStr
 def format_arduino_sketch(model_dir):
     #read model flatbuffer
-    with open(model_dir + '/output_model.cc', 'r') as f:
+    with open(f'{model_dir}/output_model.cc', 'r') as f:
         data = f.read()
         model_buffer = data[data.find('{')+1 : data.find('}')]
         search_string = 'len = '
         model_buffer_len = data[data.find(search_string) + len(search_string) : data.rfind(';')]
-        print('parsed ' + model_buffer_len + ' model flatbuffer bytes')
+        print(f'parsed {model_buffer_len} model flatbuffer bytes')
 
     #write model buffer into arduino file
-    with open(model_dir + '/tm_template_script/person_detect_model_data.cpp', 'r+') as f:
+    with open(f'{model_dir}/tm_template_script/person_detect_model_data.cpp', 'r+') as f:
         model_template = Template(f.read())
         new_file = model_template.safe_substitute({ 'model_buf': model_buffer, 'model_buf_len': model_buffer_len })
         f.seek(0)
         f.write(new_file)
         f.truncate()
     #write model settings
-    with open(model_dir + '/tm_template_script/model_settings.h', 'r+') as f:
+    with open(f'{model_dir}/tm_template_script/model_settings.h', 'r+') as f:
         # data = f.read()
         # print(data)
         settings_template = Template(f.read())
@@ -122,7 +132,7 @@ def format_arduino_sketch(model_dir):
         f.write(new_file)
         f.truncate()
 
-    with open(model_dir + '/tm_template_script/model_settings.cpp', 'r+') as f:
+    with open(f'{model_dir}/tm_template_script/model_settings.cpp', 'r+') as f:
         class_labels_template = Template(f.read())
         # print('new labels', format_labels())
         new_file = class_labels_template.safe_substitute({ 'labels': format_labels()})
@@ -141,26 +151,26 @@ async def create_upload_file(type: str, format: str, background_tasks: Backgroun
     print("uploading", flush=True)
     global labels, datapath,instanceReady
     instanceReady = False
-    
-    if (type != 'tiny_image' or (format == "tinyml" and dataset == None)):
+
+    if type != 'tiny_image' or format == "tinyml" and dataset is None:
         raise HTTPException(status_code=403, detail="bad request format")
-    
+
     model_dir = tempfile.mkdtemp()
-    print("### Created "+model_dir)
+    print(f"### Created {model_dir}")
     data_dir = tempfile.mkdtemp()
     unzipFile(model, model_dir)
     background_tasks.add_task(cleanup_files, model_dir, data_dir)
-    
-    os.system('cp -r tm_template_script ' + model_dir)
 
-    with open(model_dir + '/metadata.json') as json_file:
+    os.system(f'cp -r tm_template_script {model_dir}')
+
+    with open(f'{model_dir}/metadata.json') as json_file:
         data = json.load(json_file)
     labels = data['labels']
-    
+
     print("Generating lables.txt")
-    with open(model_dir + '/labels.txt', 'w') as f:
+    with open(f'{model_dir}/labels.txt', 'w') as f:
         for idx, label in enumerate(labels):
-            f.write("{} {}\n".format(idx, label))
+            f.write(f"{idx} {label}\n")
 
     print('Labels:'+', '.join(labels), flush=True)
     print('converting model to keras', flush=True)
@@ -168,13 +178,19 @@ async def create_upload_file(type: str, format: str, background_tasks: Backgroun
                 model_dir + '/model.json" ' + model_dir + '/keras_model.h5')
     if format == 'keras':
         return returnFile('keras_model.h5', model_dir, data_dir); 
-    
-    converter = tf.lite.TFLiteConverter.from_keras_model_file(model_dir + '/keras_model.h5')
+
+    converter = tf.lite.TFLiteConverter.from_keras_model_file(
+        f'{model_dir}/keras_model.h5'
+    )
+
     converter.optimizations=[tf.lite.Optimize.DEFAULT]
-    
+
     if format == 'tflite':
         tf_quant_model = converter.convert()
-        open(model_dir + '/vww_96_grayscale_quantized.tflite', 'wb').write(tf_quant_model)
+        open(f'{model_dir}/vww_96_grayscale_quantized.tflite', 'wb').write(
+            tf_quant_model
+        )
+
         return returnFile('vww_96_grayscale_quantized.tflite', model_dir, data_dir)
     if format == 'tinyml':
         unzipFile(dataset, data_dir)
@@ -183,8 +199,14 @@ async def create_upload_file(type: str, format: str, background_tasks: Backgroun
         converter.inference_output_type = tf.lite.constants.INT8
         converter.representative_dataset = representative_dataset_gen
         tf_quant_model = converter.convert()
-        open(model_dir + '/vww_96_grayscale_quantized.tflite', 'wb').write(tf_quant_model)
-        os.system('xxd -i ' + model_dir + '/vww_96_grayscale_quantized.tflite > ' + model_dir + '/output_model.cc' )
+        open(f'{model_dir}/vww_96_grayscale_quantized.tflite', 'wb').write(
+            tf_quant_model
+        )
+
+        os.system(
+            f'xxd -i {model_dir}/vww_96_grayscale_quantized.tflite > {model_dir}/output_model.cc'
+        )
+
 
         format_arduino_sketch(model_dir)
 
